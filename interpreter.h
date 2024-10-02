@@ -155,4 +155,94 @@ class BinaryOp final : public OpExpr {
         char op;
 };
 
+class CostantExp : public Expression{
+public:
+    virtual ~Costant() {};
+    virtual int interpret() = 0;
+};
+
+//---------- SUBCLASSES OF COSTANT ----------//
+
+class IntConst : public CostantExp{
+public:
+    IntConst(int v) : valore(v) {};
+    ~IntConst() {};
+    int interpret() override;
+
+private:
+    int valore;
+};
+
+class BooleanConst : public CostantExp{
+public:
+    BooleanConst(int b) : binario(b) {};
+    ~PrintStmt() {};
+    int interpret() override;
+
+private:
+    int binario;
+};
+
+class LogicalExp : public Expression {
+public:
+    virtual ~Logical() {};
+    virtual int interpret() = 0;
+};
+
+//---------- SUBCLASSES OF LOGICAL ----------//
+
+class NotLog : public LogicalExp {
+public:
+    NotLog(Expression* l) : left(l) {};
+    ~Notlog() {};
+    int interpret() override;
+
+private:
+    Expression* left;
+};
+
+class OrLog : public LogicalExp{
+public:
+    OrLog(Expression* l, Expression* r) : left(l), right(r) {};
+    ~OrLog() {};
+    int interpret() override;
+
+private:
+    Expression* left;
+    Expression* right
+};
+
+class AndLog : public LogicalExp{
+public:
+    AndLog(Expression* l, Expression* r) : left(l), right(r) {};
+    ~AndLog() {};
+    int interpret() override;
+
+private:
+    Expression* left;
+    Expression* right
+};
+
+class RelLog : public LogicalExp{
+public:
+    enum symbCode { GT, LT, EQ, GET, LET, CON };
+    RelLog(Expression* l, Expression* r, RelLog::symbCode smc) :  left(l), right(r), sc(smc){};
+    ~RelLog() {};
+    int interpret() override;
+
+private:
+    Expression* left;
+    Expression* right;
+    RelLog::symbCode sc;
+};
+
+class IdExp final : public Expression {
+public:
+    IdExp(std::string nid) : id(nid){}
+    ~IdExp() {};
+    int interpreter() override;
+private:
+    std::string id;
+};
+
 #endif //INTERPRETER_H

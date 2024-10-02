@@ -19,4 +19,17 @@ int ElseStmt::interpret(){
     }
     return 0;
 }
+int WhileStmt::interpret() {
+    while(condition->interpret()) loop->interpret();
+    return 0;
+}
+
+int DoStmt::interpret(){
+    do{
+        doloop->interpreter();
+    }while(condition->interpret())
+    return 0;
+}
+
+
 

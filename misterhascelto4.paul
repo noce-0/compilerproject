@@ -6,13 +6,12 @@
 //N4
 
 // Costruttore 
-Parser::Parser(std::vector<Token>& tokens) : tokens(tokens), currentTokenIndex(0) {
-    if (tokens.size() > 0) {
-        currentToken = std::optional<Token>(tokens[currentTokenIndex]);
-    } else {
-        currentToken = std::nullopt;
+Parser::Parser(std::vector<Token>& tokens) : InputToken(tokens), currentTokenIndex(0), currentToken(InputToken[currentTokenIndex]) {
+    if (InputToken.size() > 0)
+        currentToken = InputToken[currentTokenIndex];
+    else
+        error("No tokens found");
     }
-}
 
 // Modifica: advance() ora restituisce bool e usa std::optional per una gestione più sicura
 bool Parser::advance() {

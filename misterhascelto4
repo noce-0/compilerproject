@@ -1,0 +1,670 @@
+#include "Parser.h"
+#include <iostream>
+#include <optional>  // Aggiunto per gestire currentToken come std::optional
+
+
+//N4
+
+// Costruttore 
+Parser::Parser(std::vector<Token>& tokens) : tokens(tokens), currentTokenIndex(0) {
+    if (tokens.size() > 0) {
+        currentToken = std::optional<Token>(tokens[currentTokenIndex]);
+    } else {
+        currentToken = std::nullopt;
+    }
+}
+
+// Modifica: advance() ora restituisce bool e usa std::optional per una gestione più sicura
+bool Parser::advance() {
+    if (currentTokenIndex < tokens.size() - 1) {
+        currentToken = tokens[++currentTokenIndex];
+        return true;
+    } else {
+        currentToken = std::nullopt;  // Nessun token valido
+        return false;
+    }
+}
+
+bool Parser::match(int tokenTag) {
+    if (currentToken && currentToken->tag == tokenTag) {  // Verifica che il token sia valido
+        advance();
+        return true;
+    }
+    return false;
+}
+
+// Funzione di gestione degli errori
+void Parser::error(const std::string& msg) {
+    throw ParseError("Parse Error: " + msg + " at token " + (currentToken ? currentToken->word : "EOF"));
+}
+
+void Parser::parse() {
+    program();  // Inizia dal nodo principale <program>
+}
+
+void Parser::program() {
+    block();  // <program> → <block>
+}
+
+void Parser::block() {
+    if (match(Token::OG)) {  // Verifica apertura graffa '{'
+        decls();  // <block> → { <decls> <stmts> }
+        stmts();
+        if (!match(Token::CG)) {  // Verifica chiusura graffa '}'
+            error("Expected '}'");
+        }
+    } else {
+        error("Expected '{'");
+    }
+}
+
+// Modifica: Gestione degli array aggiunta in decls() e decl()
+void Parser::decls() {
+    if (currentToken && (currentToken->tag == Token::INT || currentToken->tag == Token::BOOL)) {
+        decl();  // Parsing di una dichiarazione
+        decls();  // Ricorsione: <decls> → <decl> <decls> | ϵ
+    }
+    else{
+        return;
+    } //Altrimenti epsilon (decls vuoto)
+}
+
+void Parser::decl() {
+    type();  // Parsing del tipo di variabile (int o boolean)
+    if (!match(Token::ID)) {
+        error("Expected identifier after type declaration");
+    }
+    if (match(Token::LB)) {  // Aggiunta gestione array
+        if (!match(Token::NUM)) {
+            error("Expected number in array declaration");
+        }
+        if (!match(Token::RB)) {
+            error("Expected ']' after array size");
+        }
+    }
+    if (!match(Token::PV)) {  // Punto e virgola atteso dopo la dichiarazione
+        error("Expected ';' after declaration");
+    }
+}
+
+void Parser::type() {
+    basic();  // Parsing del tipo base
+    // Modifica: gestione per tipi complessi aggiungendo altre regole qui se necessario (es. puntatori o strutture)
+}
+
+void Parser::basic() {
+    if (!(match(Token::INT) || match(Token::BOOL))) {
+        error("Expected 'int' or 'boolean'");
+    }
+}
+
+void Parser::stmts() {
+    if (currentToken && currentToken->tag != Token::CG) {  // Verifica che non siamo alla fine del blocco
+        stmt();
+        stmts();  // Ricorsione: <stmts> → <stmt> <stmts> | ϵ
+    }
+    // Altrimenti epsilon (stmts vuoto)
+}
+
+void Parser::stmt() {
+    if (match(Token::ID)) {
+        loc();
+        if (match(Token::EQ)) {
+            expr();  // Parsing di un'espressione
+            if (!match(Token::PV)) {
+                error("Expected ';' after expression");
+            }
+        } else {
+            error("Expected '=' after identifier");
+        }
+    } else if (match(Token::IF)) {
+        ifstmt();
+    } else if (match(Token::WHILE)) {
+        whilestmt();
+    } else if (match(Token::DO)) {
+        dostmt();
+    } else if (match(Token::BREAK)) {
+        breakstmt();
+    } else if (match(Token::PRINT)) {
+        print();
+    } else {
+        error("Unexpected token in statement");
+    }
+}
+
+void Parser::loc() {
+    if (!match(Token::ID)) {
+        error("Expected identifier in location");
+    }
+}
+
+void Parser::ifstmt() {
+    if (!match(Token::OP)) {
+        error("Expected '(' after 'if'");
+    }
+    bool_expr();  // Condizione booleana
+    if (!match(Token::CP)) {
+        error("Expected ')' after condition");
+    }
+    stmt();  // Parsing dell'istruzione del blocco `if`
+    if (match(Token::ELSE)) {
+        stmt();  // Parsing dell'istruzione del blocco `else`
+    }
+}
+
+void Parser::whilestmt() {
+    if (!match(Token::OP)) {
+        error("Expected '(' after 'while'");
+    }
+    bool_expr();  // Parsing della condizione booleana
+    if (!match(Token::CP)) {
+        error("Expected ')' after condition");
+    }
+    stmt();  // Parsing del corpo del `while`
+}
+
+void Parser::dostmt() {
+    stmt();  // Parsing del corpo del `do`
+    if (!match(Token::WHILE)) {
+        error("Expected 'while' after 'do'");
+    }
+    if (!match(Token::OP)) {
+        error("Expected '(' after 'while'");
+    }
+    bool_expr();  // Parsing della condizione booleana
+    if (!match(Token::CP)) {
+        error("Expected ')' after condition");
+    }
+    if (!match(Token::PV)) {
+        error("Expected ';' after 'do-while' loop");
+    }
+}
+
+void Parser::breakstmt() {
+    if (!match(Token::PV)) {
+        error("Expected ';' after 'break'");
+    }
+}
+
+void Parser::print() {
+    if (!match(Token::OP)) {
+        error("Expected '(' after 'print'");
+    }
+    expr();  // Stampa di un'espressione
+    if (!match(Token::CP)) {
+        error("Expected ')' after 'print'");
+    }
+    if (!match(Token::PV)) {
+        error("Expected ';' after 'print' statement");
+    }
+}
+
+void Parser::expr() {
+    term();  // Parsing del primo termine
+    while (match(Token::ADD) || match(Token::SUB)) {
+        term();  // Ricorsione per altri termini
+    }
+}
+
+void Parser::term() {
+    unary();  // Parsing del fattore unario
+    while (match(Token::MUL) || match(Token::DIV)) {
+        unary();  // Ricorsione per altri fattori
+    }
+}
+
+void Parser::unary() {
+    if (match(Token::SUB)) {  // Parsing di un numero negativo
+        factor();
+    } else {
+        factor();  // Parsing di un fattore normale
+    }
+}
+
+void Parser::factor() {
+    if (match(Token::NUM)) {
+        // Gestione del numero
+    } else if (match(Token::ID)) {
+        loc();  // Parsing di una variabile
+    } else if (match(Token::OP)) {
+        expr();  // Espressione racchiusa tra parentesi
+        if (!match(Token::CP)) {
+            error("Expected ')'");
+        }
+    } else {
+        error("Unexpected token in factor");
+    }
+}
+
+void Parser::bool_expr() {
+    join();  // Parsing dell'espressione booleana
+}
+
+void Parser::join() {
+    equality();  // Parsing del confronto di uguaglianza
+    while (match(Token::AND)) {
+        equality();  // Parsing di un'altra espressione di uguaglianza
+    }
+}
+
+void Parser::equality() {
+    rel();  // Parsing della relazione
+    while (match(Token::EQ) || match(Token::NOTEQ)) {
+        rel();  // Parsing di un'altra relazione
+    }
+}
+
+void Parser::rel() {
+    expr();  // Parsing di un'espressione
+    if (match(Token::LT) || match(Token::GT) || match(Token::LE) || match(Token::GE)) {
+        expr();  // Parsing di un'altra espressione
+    }
+}
+
+
+//N3
+
+#include "Parser.h"
+#include <iostream>
+
+Parser::Parser(std::vector<Token>& tokens) : tokens(tokens), currentTokenIndex(0) {
+    currentToken = tokens[currentTokenIndex];
+}
+
+void Parser::advance() {
+    if (currentTokenIndex < tokens.size() - 1) {
+        currentToken = tokens[++currentTokenIndex];
+    }
+}
+
+bool Parser::match(int tokenTag) {
+    if (currentToken.tag == tokenTag) {
+        advance();
+        return true;
+    }
+    return false;
+}
+
+void Parser::error(const std::string& msg) {
+    throw ParseError("Parse Error: " + msg + " at token " + currentToken.word);
+}
+
+void Parser::parse() {
+    program();  // Inizia dal nodo principale <program>
+}
+
+void Parser::program() {
+    block();  // <program> → <block>
+}
+
+void Parser::block() {
+    if (match(Token::OG)) {  // Verifica apertura graffa '{'
+        decls();  // <block> → { <decls> <stmts> }
+        stmts();
+        if (!match(Token::CG)) {  // Verifica chiusura graffa '}'
+            error("Expected '}'");
+        }
+    } else {
+        error("Expected '{'");
+    }
+}
+
+void Parser::decls() {
+    if (currentToken.tag == Token::INT || currentToken.tag == Token::BOOL) {
+        decl();  // Parsing di una dichiarazione
+        decls();  // Ricorsione: <decls> → <decl> <decls> | ϵ
+    }
+    // Altrimenti epsilon (decls vuoto)
+}
+
+void Parser::decl() {
+    type();  // Parsing del tipo di variabile (int o boolean)
+    if (!match(Token::ID)) {
+        error("Expected identifier after type declaration");
+    }
+    if (!match(Token::PV)) {  // Punto e virgola atteso dopo la dichiarazione
+        error("Expected ';' after declaration");
+    }
+}
+
+void Parser::type() {
+    basic();  // Parsing del tipo base
+    // Aggiungi altre regole se hai array o puntatori
+}
+
+void Parser::basic() {
+    if (!(match(Token::INT) || match(Token::BOOL))) {
+        error("Expected 'int' or 'boolean'");
+    }
+}
+
+void Parser::stmts() {
+    if (currentToken.tag != Token::CG) {  // Verifica che non siamo alla fine del blocco
+        stmt();
+        stmts();  // Ricorsione: <stmts> → <stmt> <stmts> | ϵ
+    }
+    // Altrimenti epsilon (stmts vuoto)
+}
+
+void Parser::stmt() {
+    if (match(Token::ID)) {
+        loc();
+        if (match(Token::EQ)) {
+            expr();  // Parsing di un'espressione
+            if (!match(Token::PV)) {
+                error("Expected ';' after expression");
+            }
+        } else {
+            error("Expected '=' after identifier");
+        }
+    } else if (match(Token::IF)) {
+        ifstmt();
+    } else if (match(Token::WHILE)) {
+        whilestmt();
+    } else if (match(Token::DO)) {
+        dostmt();
+    } else if (match(Token::BREAK)) {
+        breakstmt();
+    } else if (match(Token::PRINT)) {
+        print();
+    } else {
+        error("Unexpected token in statement");
+    }
+}
+
+void Parser::loc() {
+    if (!match(Token::ID)) {
+        error("Expected identifier in location");
+    }
+}
+
+void Parser::ifstmt() {
+    if (!match(Token::OP)) {
+        error("Expected '(' after 'if'");
+    }
+    bool_expr();  // Condizione booleana
+    if (!match(Token::CP)) {
+        error("Expected ')' after condition");
+    }
+    stmt();  // Parsing dell'istruzione del blocco `if`
+    if (match(Token::ELSE)) {
+        stmt();  // Parsing dell'istruzione del blocco `else`
+    }
+}
+
+void Parser::whilestmt() {
+    if (!match(Token::OP)) {
+        error("Expected '(' after 'while'");
+    }
+    bool_expr();  // Parsing della condizione booleana
+    if (!match(Token::CP)) {
+        error("Expected ')' after condition");
+    }
+    stmt();  // Parsing del corpo del `while`
+}
+
+void Parser::dostmt() {
+    stmt();  // Parsing del corpo del `do`
+    if (!match(Token::WHILE)) {
+        error("Expected 'while' after 'do'");
+    }
+    if (!match(Token::OP)) {
+        error("Expected '(' after 'while'");
+    }
+    bool_expr();  // Parsing della condizione booleana
+    if (!match(Token::CP)) {
+        error("Expected ')' after condition");
+    }
+    if (!match(Token::PV)) {
+        error("Expected ';' after 'do-while' loop");
+    }
+}
+
+void Parser::breakstmt() {
+    if (!match(Token::PV)) {
+        error("Expected ';' after 'break'");
+    }
+}
+
+void Parser::print() {
+    if (!match(Token::OP)) {
+        error("Expected '(' after 'print'");
+    }
+    expr();  // Stampa di un'espressione
+    if (!match(Token::CP)) {
+        error("Expected ')' after 'print'");
+    }
+    if (!match(Token::PV)) {
+        error("Expected ';' after 'print' statement");
+    }
+}
+
+void Parser::expr() {
+    term();  // Parsing del primo termine
+    while (match(Token::ADD) || match(Token::SUB)) {
+        term();  // Ricorsione per altri termini
+    }
+}
+
+void Parser::term() {
+    unary();  // Parsing del fattore unario
+    while (match(Token::MUL) || match(Token::DIV)) {
+        unary();  // Ricorsione per altri fattori
+    }
+}
+
+void Parser::unary() {
+    if (match(Token::SUB)) {  // Parsing di un numero negativo
+        factor();
+    } else {
+        factor();  // Parsing di un fattore normale
+    }
+}
+
+void Parser::factor() {
+    if (match(Token::NUM)) {
+        // Gestione del numero
+    } else if (match(Token::ID)) {
+        loc();  // Parsing di una variabile
+    } else if (match(Token::OP)) {
+        expr();  // Espressione racchiusa tra parentesi
+        if (!match(Token::CP)) {
+            error("Expected ')'");
+        }
+    } else {
+        error("Unexpected token in factor");
+    }
+}
+
+void Parser::bool_expr() {
+    join();  // Parsing dell'espressione booleana
+}
+
+void Parser::join() {
+    equality();  // Parsing del confronto di uguaglianza
+    while (match(Token::AND)) {
+        equality();  // Parsing di un'altra espressione di uguaglianza
+    }
+}
+
+void Parser::equality() {
+    rel();  // Parsing della relazione
+    while (match(Token::EQ) || match(Token::NOTEQ)) {
+        rel();  // Parsing di un'altra relazione
+    }
+}
+
+void Parser::rel() {
+    expr();  // Parsing di un'espressione
+    if (match(Token::LT) || match(Token::GT) || match(Token::LE) || match(Token::GE)) {
+        expr();  // Parsing di un'altra espressione
+    }
+}
+
+
+//N0
+
+
+#include "Parser.h"
+#include <iostream>
+
+Parser::Parser(std::vector<Token>& tokens) : tokens(tokens), currentTokenIndex(0) {
+    currentToken = tokens[currentTokenIndex];  // Inizia dal primo token
+}
+
+void Parser::advance() {
+    if (currentTokenIndex < tokens.size() - 1) {
+        currentToken = tokens[++currentTokenIndex];
+    }
+}
+
+bool Parser::match(int tokenTag) {
+    if (currentToken.tag == tokenTag) {
+        advance();
+        return true;
+    }
+    return false;
+}
+
+void Parser::error(const std::string& msg) {
+    throw ParseError("Parse Error: " + msg + " at token " + currentToken.word);
+}
+
+void Parser::parse() {
+    program();  // Inizia dal nodo principale <program>
+}
+
+void Parser::program() {
+    block();  // <program> → <block>
+}
+
+void Parser::block() {
+    if (match(Token::OG)) {  // Verifica apertura graffa
+        decls();  // <block> → { <decls> <stmts> }
+        stmts();
+        if (!match(Token::CG)) {  // Verifica chiusura graffa
+            error("Expected '}'");
+        }
+    } else {
+        error("Expected '{'");
+    }
+}
+
+void Parser::decls() {
+    if (currentToken.tag == Token::INT || currentToken.tag == Token::BOOL) {
+        decl();
+        decls();  // Ricorsione: <decls> → <decl> <decls> | ϵ
+    }
+    // Altrimenti epsilon (decls vuoto)
+}
+
+void Parser::decl() {
+    if (match(Token::INT) || match(Token::BOOL)) {
+        if (!match(Token::ID)) {
+            error("Expected identifier after type declaration");
+        }
+        if (!match(Token::PV)) {
+            error("Expected ';' after declaration");
+        }
+    } else {
+        error("Expected type declaration (int or boolean)");
+    }
+}
+
+void Parser::stmts() {
+    if (currentToken.tag != Token::CG) {  // Verifica che non siamo alla fine del blocco
+        stmt();
+        stmts();  // Ricorsione: <stmts> → <stmt> <stmts> | ϵ
+    }
+    // Altrimenti epsilon (stmts vuoto)
+}
+
+void Parser::stmt() {
+    // Gestisci varie regole sintattiche per <stmt> come assegnamento, if, while, etc.
+    if (match(Token::ID)) {
+        if (match(Token::EQ)) {
+            bool_expr();  // Assegnamento: id = <bool> ;
+            if (!match(Token::PV)) {
+                error("Expected ';' after assignment");
+            }
+        } else {
+            error("Expected '=' after identifier");
+        }
+    } else if (match(Token::IF)) {
+        if (!match(Token::OP)) {
+            error("Expected '(' after 'if'");
+        }
+        bool_expr();
+        if (!match(Token::CP)) {
+            error("Expected ')' after condition");
+        }
+        stmt();
+        if (match(Token::ELSE)) {
+            stmt();  // Gestisce <else> opzionale
+        }
+    } else {
+        error("Unexpected token in statement");
+    }
+}
+
+void Parser::bool_expr() {
+    // Implementa il parsing delle espressioni booleane, come definito dalla grammatica
+    expr();  // Come esempio, chiama expr (devi implementare le regole corrette)
+}
+
+void Parser::expr() {
+    term();  // <expr> → <expr> + <term> | <expr> - <term> | <term>
+    while (match(Token::ADD) || match(Token::SUB)) {
+        term();  // Ricorsione sinistra
+    }
+}
+
+void Parser::term() {
+    factor();  // <term> → <term> * <unary> | <term> / <unary> | <unary>
+    while (match(Token::MUL) || match(Token::DIV)) {
+        factor();  // Ricorsione sinistra
+    }
+}
+
+void Parser::factor() {
+    // <factor> → ( <bool> ) | <loc> | num | true | false
+    if (match(Token::OP)) {
+        bool_expr();
+        if (!match(Token::CP)) {
+            error("Expected ')'");
+        }
+    } else if (match(Token::NUM) || match(Token::TRUE) || match(Token::FALSE)) {
+        // match del numero o delle costanti booleane
+    } else if (match(Token::ID)) {
+        // match di una variabile
+    } else {
+        error("Unexpected token in factor");
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+bool match(TokenType type)
+{
+    if (!check(type))
+        return false;
+    parser.advance();
+    return true;
+}
+bool check(TokenType type)
+{
+    return parser.current.type == type;
+}
+*/
+
+
